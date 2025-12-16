@@ -1,0 +1,9 @@
+---
+# TODO: Milestone 5 - AI Module + Ollama deployment
+# - Deploy Ollama (internal only)
+# - Deploy FastAPI AI module
+# - Pull llama3.2 model
+
+- name: Placeholder - ai_stack role
+  ansible.builtin.debug:
+    msg: "ai_stack role not yet implemented (Milestone 5)"

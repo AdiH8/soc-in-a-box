@@ -1,0 +1,42 @@
+---
+# =============================================================================
+# wazuh_single role - Default variables
+# =============================================================================
+
+# Wazuh version (must match wazuh-ansible tag)
+wazuh_version: "4.14.1"
+wazuh_ansible_tag: "v4.14.1"
+
+# Where to clone wazuh-ansible
+wazuh_ansible_repo: "https://github.com/wazuh/wazuh-ansible.git"
+wazuh_ansible_path: "/opt/wazuh-ansible"
+
+# Single-node configuration
+wazuh_single_node: true
+wazuh_indexer_network_host: "127.0.0.1"
+
+# Node names
+wazuh_indexer_node_name: "wazuh-indexer"
+wazuh_manager_node_name: "wazuh-manager"
+wazuh_dashboard_node_name: "wazuh-dashboard"
+
+# Dashboard settings
+wazuh_dashboard_server_host: "0.0.0.0"
+wazuh_dashboard_server_port: 443
+
+# JVM settings (adjust based on available RAM)
+# For 16GB RAM system, allocate ~4GB to indexer
+wazuh_indexer_jvm_xms: "2g"
+wazuh_indexer_jvm_xmx: "2g"
+
+# API settings
+wazuh_api_bind_addr: "0.0.0.0"
+wazuh_api_port: 55000
+wazuh_api_https: true
+
+# Filebeat output
+wazuh_filebeat_indexer_hosts:
+  - "127.0.0.1:9200"
+
+# Force reinstall (set to true to clean and reinstall)
+wazuh_force_reinstall: false

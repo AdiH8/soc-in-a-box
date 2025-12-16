@@ -1,0 +1,104 @@
+# =============================================================================
+# SOC-in-a-Box - Global Variables
+# =============================================================================
+# These defaults can be overridden in host_vars or at runtime with -e flag
+# Example: ansible-playbook ... -e "exposure=public"
+
+# -----------------------------------------------------------------------------
+# Firewall / Network Exposure
+# -----------------------------------------------------------------------------
+# Options:
+#   - lan: Only allow access from private networks (10.x, 172.16.x, 192.168.x)
+#   - public: Allow access from internet (use with caution)
+exposure: lan
+
+# Private network ranges (used when exposure=lan)
+private_networks:
+  - "10.0.0.0/8"
+  - "172.16.0.0/12"
+  - "192.168.0.0/16"
+
+# -----------------------------------------------------------------------------
+# Service Ports
+# -----------------------------------------------------------------------------
+ports:
+  ssh: 22
+  wazuh_dashboard: 443
+  wazuh_agent: 1514
+  wazuh_registration: 1515
+  wazuh_indexer: 9200
+  iris: 8443
+  ai_module: 8085
+  ollama: 11434  # Internal only, never exposed publicly
+
+# -----------------------------------------------------------------------------
+# Component Versions (pinned - see docs/versions.md)
+# -----------------------------------------------------------------------------
+versions:
+  wazuh: "4.14.1"
+  wazuh_ansible_tag: "v4.14.1"
+  iris: "v2.4.24"
+  ollama: "0.5.13"
+  ollama_model: "llama3.2:3b"
+  ollama_model_fallback: "llama3.2:1b"
+
+# -----------------------------------------------------------------------------
+# Wazuh Settings
+# -----------------------------------------------------------------------------
+wazuh:
+  # Single-node deployment
+  indexer_node_name: "wazuh-indexer"
+  manager_node_name: "wazuh-manager"
+  dashboard_node_name: "wazuh-dashboard"
+
+  # Cluster disabled for single-node
+  cluster_disabled: true
+
+# -----------------------------------------------------------------------------
+# DFIR-IRIS Settings
+# -----------------------------------------------------------------------------
+iris:
+  install_path: "/opt/iris"
+  # Password set via DEMO_ADMIN_PASSWORD env var or generated on first boot
+  # NEVER put actual passwords here
+
+# -----------------------------------------------------------------------------
+# AI Module Settings
+# -----------------------------------------------------------------------------
+ai:
+  install_path: "/opt/ai-module"
+
+  # Alert severity threshold for AI enrichment
+  # Only alerts with level >= this value will be sent to AI
+  # Wazuh levels: 0-15 (0=ignore, 3=low, 7=medium, 10=high, 12=critical)
+  severity_threshold: 10
+
+  # Request timeout for Ollama (seconds)
+  ollama_timeout: 120
+
+  # Max tokens in response
+  max_tokens: 1024
+
+# -----------------------------------------------------------------------------
+# TLS Settings
+# -----------------------------------------------------------------------------
+tls:
+  # For MVP: self-signed certificates
+  # For production: set to "letsencrypt" and provide domain
+  mode: "selfsigned"
+  # domain: "soc.example.com"  # Uncomment for Let's Encrypt
+
+# -----------------------------------------------------------------------------
+# Optional: Basic Auth (for exposure=public)
+# -----------------------------------------------------------------------------
+basic_auth:
+  enabled: false
+  # Username/password set via environment variables, never here
+
+# -----------------------------------------------------------------------------
+# System Settings
+# -----------------------------------------------------------------------------
+system:
+  timezone: "UTC"
+  # Swap disabled by default for Elasticsearch/Wazuh Indexer performance
+  swap_disabled: true

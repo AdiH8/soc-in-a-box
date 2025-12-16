@@ -1,0 +1,9 @@
+---
+# TODO: Milestone 4 - DFIR-IRIS Docker deployment
+# - Copy compose files
+# - Configure environment
+# - Start containers
+
+- name: Placeholder - iris_stack role
+  ansible.builtin.debug:
+    msg: "iris_stack role not yet implemented (Milestone 4)"

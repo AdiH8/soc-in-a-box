@@ -1,0 +1,99 @@
+---
+# =============================================================================
+# common_base role - Base OS configuration for Ubuntu 22.04
+# =============================================================================
+
+- name: Update apt cache
+  ansible.builtin.apt:
+    update_cache: yes
+    cache_valid_time: 3600
+  tags: [apt]
+
+- name: Upgrade all packages
+  ansible.builtin.apt:
+    upgrade: safe
+  tags: [apt, upgrade]
+
+- name: Install essential packages
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - curl
+      - gnupg
+      - lsb-release
+      - apt-transport-https
+      - software-properties-common
+      - python3
+      - python3-pip
+      - git
+      - wget
+      - vim
+      - htop
+      - net-tools
+      - jq
+      - unzip
+    state: present
+  tags: [packages]
+
+- name: Set timezone
+  ansible.builtin.timezone:
+    name: "{{ system.timezone }}"
+  tags: [timezone]
+
+- name: Ensure chrony is installed for time sync
+  ansible.builtin.apt:
+    name: chrony
+    state: present
+  tags: [ntp]
+
+- name: Enable and start chrony service
+  ansible.builtin.systemd:
+    name: chrony
+    enabled: yes
+    state: started
+  tags: [ntp]
+
+# -----------------------------------------------------------------------------
+# Sysctl tuning for Wazuh/Elasticsearch
+# -----------------------------------------------------------------------------
+- name: Configure sysctl for Wazuh Indexer (vm.max_map_count)
+  ansible.posix.sysctl:
+    name: vm.max_map_count
+    value: "262144"
+    state: present
+    sysctl_file: /etc/sysctl.d/99-soc-in-a-box.conf
+    reload: yes
+  tags: [sysctl]
+
+- name: Configure sysctl for network performance
+  ansible.posix.sysctl:
+    name: "{{ item.name }}"
+    value: "{{ item.value }}"
+    state: present
+    sysctl_file: /etc/sysctl.d/99-soc-in-a-box.conf
+    reload: yes
+  loop:
+    - { name: "net.core.somaxconn", value: "65535" }
+    - { name: "net.ipv4.tcp_max_syn_backlog", value: "65535" }
+  tags: [sysctl]
+
+# -----------------------------------------------------------------------------
+# Swap configuration (disable for Elasticsearch performance)
+# -----------------------------------------------------------------------------
+- name: Disable swap (if configured)
+  ansible.builtin.command: swapoff -a
+  when: system.swap_disabled | default(true)
+  changed_when: false
+  tags: [swap]
+
+- name: Remove swap from fstab
+  ansible.builtin.lineinfile:
+    path: /etc/fstab
+    regexp: '\sswap\s'
+    state: absent
+  when: system.swap_disabled | default(true)
+  tags: [swap]
+
+- name: Display base configuration complete
+  ansible.builtin.debug:
+    msg: "common_base role completed successfully"

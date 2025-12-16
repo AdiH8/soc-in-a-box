@@ -1,0 +1,73 @@
+---
+# =============================================================================
+# SOC-in-a-Box Server Deployment Playbook
+# =============================================================================
+# Usage:
+#   ansible-playbook playbooks/deploy_server.yml --ask-pass --ask-become-pass
+#
+# Override variables:
+#   ansible-playbook playbooks/deploy_server.yml --ask-pass --ask-become-pass \
+#     -e "exposure=public"
+# =============================================================================
+
+- name: Deploy SOC-in-a-Box Server Stack
+  hosts: soc_server
+  become: true
+  gather_facts: true
+
+  pre_tasks:
+    - name: Display deployment info
+      ansible.builtin.debug:
+        msg:
+          - "Target: {{ inventory_hostname }}"
+          - "Exposure mode: {{ exposure }}"
+          - "Wazuh version: {{ versions.wazuh }}"
+          - "IRIS version: {{ versions.iris }}"
+          - "Ollama version: {{ versions.ollama }}"
+
+    - name: Verify Ubuntu 22.04
+      ansible.builtin.assert:
+        that:
+          - ansible_distribution == "Ubuntu"
+          - ansible_distribution_version == "22.04"
+        fail_msg: "This playbook requires Ubuntu 22.04 LTS"
+        success_msg: "Ubuntu 22.04 confirmed"
+
+  roles:
+    # Milestone 2: Base infrastructure
+    - role: common_base
+      tags: [base, milestone2]
+
+    - role: firewall_ufw
+      tags: [firewall, milestone2]
+
+    - role: docker_engine
+      tags: [docker, milestone2]
+
+    # Milestone 3: Wazuh
+    - role: wazuh_single
+      tags: [wazuh, milestone3]
+
+    # Milestone 4: DFIR-IRIS
+    - role: dfir_iris
+      tags: [iris, milestone4]
+
+    # Milestone 5: AI Module + Ollama
+    - role: ai_stack
+      tags: [ai, milestone5]
+
+  post_tasks:
+    - name: Deployment summary
+      ansible.builtin.debug:
+        msg:
+          - "=========================================="
+          - "Deployment complete!"
+          - "=========================================="
+          - "Wazuh Dashboard: https://{{ ansible_host }}:{{ ports.wazuh_dashboard }}"
+          - "DFIR-IRIS:       https://{{ ansible_host }}:{{ ports.iris }}"
+          - "AI Module:       http://{{ ansible_host }}:{{ ports.ai_module }}/health"
+          - "=========================================="
+          - "Credentials:"
+          - "  Wazuh:  /root/.wazuh-passwords"
+          - "  IRIS:   /root/.iris-credentials"
+          - "=========================================="

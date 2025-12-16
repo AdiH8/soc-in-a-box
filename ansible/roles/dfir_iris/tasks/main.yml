@@ -1,0 +1,205 @@
+---
+# =============================================================================
+# dfir_iris role - DFIR-IRIS deployment via official repository
+# =============================================================================
+# This role:
+# 1. Clones official iris-web repository
+# 2. Configures environment variables
+# 3. Builds/pulls containers
+# 4. Starts IRIS stack
+# 5. Waits for services to be ready
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Check if IRIS is already installed
+# -----------------------------------------------------------------------------
+- name: Check if IRIS is already installed
+  ansible.builtin.stat:
+    path: "{{ iris_install_path }}/.env"
+  register: iris_installed
+  tags: [iris, install]
+
+# -----------------------------------------------------------------------------
+# Cleanup for reinstall (when iris_force_reinstall is true)
+# -----------------------------------------------------------------------------
+- name: Stop IRIS containers for reinstall
+  ansible.builtin.command:
+    cmd: docker compose down -v
+    chdir: "{{ iris_install_path }}"
+  when: iris_force_reinstall | bool and iris_installed.stat.exists
+  ignore_errors: yes
+  tags: [iris, cleanup]
+
+- name: Remove IRIS installation directory for reinstall
+  ansible.builtin.file:
+    path: "{{ iris_install_path }}"
+    state: absent
+  when: iris_force_reinstall | bool
+  tags: [iris, cleanup]
+
+# -----------------------------------------------------------------------------
+# Clone IRIS repository
+# -----------------------------------------------------------------------------
+- name: Clone IRIS repository
+  ansible.builtin.git:
+    repo: "{{ iris_repo }}"
+    dest: "{{ iris_install_path }}"
+    version: "{{ iris_version }}"
+    force: no
+  when: not iris_installed.stat.exists or iris_force_reinstall | bool
+  tags: [iris, install]
+
+# -----------------------------------------------------------------------------
+# Generate secrets
+# -----------------------------------------------------------------------------
+- name: Check if IRIS secrets already generated
+  ansible.builtin.stat:
+    path: /root/.iris-credentials
+  register: iris_creds_file
+  tags: [iris, secrets]
+
+- name: Generate IRIS secrets
+  when: not iris_creds_file.stat.exists
+  block:
+    - name: Generate database password
+      ansible.builtin.set_fact:
+        iris_db_password: "{{ lookup('password', '/dev/null length=32 chars=ascii_letters,digits') }}"
+
+    - name: Generate admin password
+      ansible.builtin.set_fact:
+        iris_admin_password: "{{ lookup('password', '/dev/null length=16 chars=ascii_letters,digits') }}"
+  tags: [iris, secrets]
+
+- name: Read existing credentials
+  ansible.builtin.slurp:
+    src: /root/.iris-credentials
+  register: existing_iris_creds
+  when: iris_creds_file.stat.exists
+  tags: [iris, secrets]
+
+- name: Parse existing admin password
+  ansible.builtin.set_fact:
+    iris_admin_password: "{{ existing_iris_creds.content | b64decode | regex_search('IRIS_ADMIN_PASSWORD=([^\\n]+)', '\\1') | first }}"
+  when: existing_iris_creds.content is defined
+  tags: [iris, secrets]
+
+# -----------------------------------------------------------------------------
+# Configure IRIS environment
+# -----------------------------------------------------------------------------
+- name: Copy sample env file
+  ansible.builtin.copy:
+    src: "{{ iris_install_path }}/.env.model"
+    dest: "{{ iris_install_path }}/.env"
+    remote_src: yes
+    force: no
+  tags: [iris, config]
+
+- name: Configure IRIS admin password
+  ansible.builtin.lineinfile:
+    path: "{{ iris_install_path }}/.env"
+    regexp: '^IRIS_ADM_PASSWORD='
+    line: "IRIS_ADM_PASSWORD={{ iris_admin_password }}"
+  tags: [iris, config]
+
+- name: Configure IRIS admin username
+  ansible.builtin.lineinfile:
+    path: "{{ iris_install_path }}/.env"
+    regexp: '^IRIS_ADM_USERNAME='
+    line: "IRIS_ADM_USERNAME={{ iris_admin_user }}"
+  tags: [iris, config]
+
+- name: Configure IRIS admin email
+  ansible.builtin.lineinfile:
+    path: "{{ iris_install_path }}/.env"
+    regexp: '^IRIS_ADM_EMAIL='
+    line: "IRIS_ADM_EMAIL=admin@iris.local"
+  tags: [iris, config]
+
+- name: Configure IRIS HTTPS port
+  ansible.builtin.lineinfile:
+    path: "{{ iris_install_path }}/.env"
+    regexp: '^INTERFACE_HTTPS_PORT='
+    line: "INTERFACE_HTTPS_PORT={{ iris_port }}"
+  tags: [iris, config]
+
+# -----------------------------------------------------------------------------
+# Build and start containers
+# -----------------------------------------------------------------------------
+- name: Build IRIS containers
+  ansible.builtin.command:
+    cmd: docker compose build
+    chdir: "{{ iris_install_path }}"
+  register: iris_build
+  changed_when: "'Built' in iris_build.stdout or 'built' in iris_build.stderr"
+  when: not iris_installed.stat.exists or iris_force_reinstall | bool
+  tags: [iris, deploy]
+
+- name: Start IRIS containers
+  ansible.builtin.command:
+    cmd: docker compose up -d
+    chdir: "{{ iris_install_path }}"
+  register: iris_start
+  changed_when: "'Started' in iris_start.stderr or 'Creating' in iris_start.stderr"
+  tags: [iris, deploy]
+
+# -----------------------------------------------------------------------------
+# Wait for services to be ready
+# -----------------------------------------------------------------------------
+- name: Wait for IRIS database to be ready
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: 5432
+    delay: 5
+    timeout: 120
+    state: started
+  tags: [iris, verify]
+  ignore_errors: yes
+
+- name: Wait for IRIS web interface to be ready
+  ansible.builtin.uri:
+    url: "https://127.0.0.1:{{ iris_port }}"
+    validate_certs: no
+    status_code: [200, 302]
+  register: iris_health
+  retries: 30
+  delay: 10
+  until: iris_health.status in [200, 302]
+  tags: [iris, verify]
+
+# -----------------------------------------------------------------------------
+# Copy secrets to standard location
+# -----------------------------------------------------------------------------
+- name: Copy IRIS credentials to /root/.iris-credentials
+  ansible.builtin.copy:
+    dest: /root/.iris-credentials
+    content: |
+      # IRIS Credentials - Generated {{ ansible_date_time.iso8601 }}
+      # KEEP THIS FILE SECURE!
+
+      IRIS_URL=https://{{ ansible_host }}:{{ iris_port }}
+      IRIS_ADMIN_USER={{ iris_admin_user }}
+      IRIS_ADMIN_PASSWORD={{ iris_admin_password }}
+    mode: "0600"
+    owner: root
+    group: root
+  tags: [iris, info]
+
+# -----------------------------------------------------------------------------
+# Display deployment info
+# -----------------------------------------------------------------------------
+- name: Display IRIS deployment info
+  ansible.builtin.debug:
+    msg:
+      - "=========================================="
+      - "DFIR-IRIS {{ iris_version }} deployed successfully!"
+      - "=========================================="
+      - "URL: https://{{ ansible_host }}:{{ iris_port }}"
+      - ""
+      - "Credentials:"
+      - "  Username: {{ iris_admin_user }}"
+      - "  Password: {{ iris_admin_password }}"
+      - ""
+      - "Credentials saved to: /root/.iris-credentials"
+      - "Full secrets in: {{ iris_install_path }}/.iris-secrets"
+      - "=========================================="
+  tags: [iris, info]

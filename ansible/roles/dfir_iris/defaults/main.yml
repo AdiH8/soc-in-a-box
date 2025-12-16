@@ -1,0 +1,23 @@
+---
+# =============================================================================
+# dfir_iris role - Default variables
+# =============================================================================
+
+# IRIS version (pinned)
+iris_version: "v2.4.24"
+
+# IRIS repository
+iris_repo: "https://github.com/dfir-iris/iris-web.git"
+
+# Installation path
+iris_install_path: "/opt/iris"
+
+# Network settings
+iris_port: 8443
+
+# Admin settings
+iris_admin_user: "administrator"
+# Password will be auto-generated if not provided
+
+# Force reinstall (set to true to clean and reinstall)
+iris_force_reinstall: false

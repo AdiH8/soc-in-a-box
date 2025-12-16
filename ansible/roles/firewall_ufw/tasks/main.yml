@@ -1,0 +1,169 @@
+---
+# =============================================================================
+# firewall_ufw role - UFW firewall configuration
+# =============================================================================
+# Supports two exposure modes:
+#   - lan: Only allow access from private networks (default)
+#   - public: Allow access from internet
+# =============================================================================
+
+- name: Install UFW
+  ansible.builtin.apt:
+    name: ufw
+    state: present
+  tags: [ufw]
+
+# -----------------------------------------------------------------------------
+# Default policies
+# -----------------------------------------------------------------------------
+- name: Set UFW default incoming policy to deny
+  community.general.ufw:
+    direction: incoming
+    policy: deny
+  tags: [ufw]
+
+- name: Set UFW default outgoing policy to allow
+  community.general.ufw:
+    direction: outgoing
+    policy: allow
+  tags: [ufw]
+
+# -----------------------------------------------------------------------------
+# SSH - Always allowed from anywhere
+# -----------------------------------------------------------------------------
+- name: Allow SSH from anywhere
+  community.general.ufw:
+    rule: allow
+    port: "{{ ports.ssh }}"
+    proto: tcp
+    comment: "SSH access"
+  tags: [ufw, ssh]
+
+# -----------------------------------------------------------------------------
+# LAN mode - Allow services only from private networks
+# -----------------------------------------------------------------------------
+- name: "LAN mode: Allow Wazuh Dashboard from private networks"
+  community.general.ufw:
+    rule: allow
+    port: "{{ ports.wazuh_dashboard }}"
+    proto: tcp
+    from_ip: "{{ item }}"
+    comment: "Wazuh Dashboard - LAN only"
+  loop: "{{ private_networks }}"
+  when: exposure == "lan"
+  tags: [ufw, wazuh]
+
+- name: "LAN mode: Allow Wazuh Agent from private networks"
+  community.general.ufw:
+    rule: allow
+    port: "{{ ports.wazuh_agent }}"
+    proto: tcp
+    from_ip: "{{ item }}"
+    comment: "Wazuh Agent - LAN only"
+  loop: "{{ private_networks }}"
+  when: exposure == "lan"
+  tags: [ufw, wazuh]
+
+- name: "LAN mode: Allow Wazuh Registration from private networks"
+  community.general.ufw:
+    rule: allow
+    port: "{{ ports.wazuh_registration }}"
+    proto: tcp
+    from_ip: "{{ item }}"
+    comment: "Wazuh Registration - LAN only"
+  loop: "{{ private_networks }}"
+  when: exposure == "lan"
+  tags: [ufw, wazuh]
+
+- name: "LAN mode: Allow IRIS from private networks"
+  community.general.ufw:
+    rule: allow
+    port: "{{ ports.iris }}"
+    proto: tcp
+    from_ip: "{{ item }}"
+    comment: "DFIR-IRIS - LAN only"
+  loop: "{{ private_networks }}"
+  when: exposure == "lan"
+  tags: [ufw, iris]
+
+- name: "LAN mode: Allow AI Module from private networks"
+  community.general.ufw:
+    rule: allow
+    port: "{{ ports.ai_module }}"
+    proto: tcp
+    from_ip: "{{ item }}"
+    comment: "AI Module - LAN only"
+  loop: "{{ private_networks }}"
+  when: exposure == "lan"
+  tags: [ufw, ai]
+
+# -----------------------------------------------------------------------------
+# Public mode - Allow services from anywhere (use with caution)
+# -----------------------------------------------------------------------------
+- name: "Public mode: Allow Wazuh Dashboard from anywhere"
+  community.general.ufw:
+    rule: allow
+    port: "{{ ports.wazuh_dashboard }}"
+    proto: tcp
+    comment: "Wazuh Dashboard - Public"
+  when: exposure == "public"
+  tags: [ufw, wazuh]
+
+- name: "Public mode: Allow Wazuh Agent from anywhere"
+  community.general.ufw:
+    rule: allow
+    port: "{{ ports.wazuh_agent }}"
+    proto: tcp
+    comment: "Wazuh Agent - Public"
+  when: exposure == "public"
+  tags: [ufw, wazuh]
+
+- name: "Public mode: Allow Wazuh Registration from anywhere"
+  community.general.ufw:
+    rule: allow
+    port: "{{ ports.wazuh_registration }}"
+    proto: tcp
+    comment: "Wazuh Registration - Public"
+  when: exposure == "public"
+  tags: [ufw, wazuh]
+
+- name: "Public mode: Allow IRIS from anywhere"
+  community.general.ufw:
+    rule: allow
+    port: "{{ ports.iris }}"
+    proto: tcp
+    comment: "DFIR-IRIS - Public"
+  when: exposure == "public"
+  tags: [ufw, iris]
+
+- name: "Public mode: Allow AI Module from anywhere"
+  community.general.ufw:
+    rule: allow
+    port: "{{ ports.ai_module }}"
+    proto: tcp
+    comment: "AI Module - Public"
+  when: exposure == "public"
+  tags: [ufw, ai]
+
+# -----------------------------------------------------------------------------
+# Ollama - NEVER exposed publicly (internal Docker network only)
+# -----------------------------------------------------------------------------
+- name: "SECURITY: Ensure Ollama port is NOT exposed"
+  community.general.ufw:
+    rule: deny
+    port: "{{ ports.ollama }}"
+    proto: tcp
+    comment: "Ollama - BLOCKED (internal only)"
+  tags: [ufw, security, ollama]
+
+# -----------------------------------------------------------------------------
+# Enable UFW
+# -----------------------------------------------------------------------------
+- name: Enable UFW
+  community.general.ufw:
+    state: enabled
+  tags: [ufw]
+
+- name: Display UFW configuration complete
+  ansible.builtin.debug:
+    msg: "firewall_ufw role completed - exposure mode: {{ exposure }}"

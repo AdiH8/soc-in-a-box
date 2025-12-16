@@ -1,0 +1,133 @@
+---
+# =============================================================================
+# docker_engine role - Docker CE + Compose Plugin installation
+# =============================================================================
+# Follows official Docker installation guide for Ubuntu:
+# https://docs.docker.com/engine/install/ubuntu/
+# =============================================================================
+
+- name: Remove old Docker packages (if any)
+  ansible.builtin.apt:
+    name:
+      - docker
+      - docker-engine
+      - docker.io
+      - containerd
+      - runc
+    state: absent
+  tags: [docker, cleanup]
+
+- name: Create keyrings directory
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    mode: "0755"
+  tags: [docker]
+
+- name: Download Docker GPG key
+  ansible.builtin.get_url:
+    url: https://download.docker.com/linux/ubuntu/gpg
+    dest: /etc/apt/keyrings/docker.asc
+    mode: "0644"
+    force: false
+  tags: [docker]
+
+- name: Get system architecture
+  ansible.builtin.command: dpkg --print-architecture
+  register: dpkg_arch
+  changed_when: false
+  tags: [docker]
+
+- name: Add Docker APT repository
+  ansible.builtin.apt_repository:
+    repo: "deb [arch={{ dpkg_arch.stdout }} signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+    state: present
+    filename: docker
+    update_cache: yes
+  tags: [docker]
+
+- name: Install Docker packages
+  ansible.builtin.apt:
+    name:
+      - docker-ce
+      - docker-ce-cli
+      - containerd.io
+      - docker-buildx-plugin
+      - docker-compose-plugin
+    state: present
+    update_cache: yes
+  tags: [docker]
+
+- name: Ensure Docker service is enabled and started
+  ansible.builtin.systemd:
+    name: docker
+    enabled: yes
+    state: started
+  tags: [docker]
+
+- name: Ensure containerd service is enabled and started
+  ansible.builtin.systemd:
+    name: containerd
+    enabled: yes
+    state: started
+  tags: [docker]
+
+# -----------------------------------------------------------------------------
+# Docker daemon configuration
+# -----------------------------------------------------------------------------
+- name: Create Docker daemon config directory
+  ansible.builtin.file:
+    path: /etc/docker
+    state: directory
+    mode: "0755"
+  tags: [docker, config]
+
+- name: Configure Docker daemon
+  ansible.builtin.copy:
+    dest: /etc/docker/daemon.json
+    content: |
+      {
+        "log-driver": "json-file",
+        "log-opts": {
+          "max-size": "100m",
+          "max-file": "3"
+        },
+        "storage-driver": "overlay2"
+      }
+    mode: "0644"
+  notify: Restart Docker
+  tags: [docker, config]
+
+# -----------------------------------------------------------------------------
+# Add ansible user to docker group (optional, for non-root docker)
+# -----------------------------------------------------------------------------
+- name: Add deploy user to docker group
+  ansible.builtin.user:
+    name: "{{ ansible_user }}"
+    groups: docker
+    append: yes
+  when: ansible_user is defined and ansible_user != "root"
+  tags: [docker, user]
+
+# -----------------------------------------------------------------------------
+# Verify installation
+# -----------------------------------------------------------------------------
+- name: Get Docker version
+  ansible.builtin.command: docker --version
+  register: docker_version
+  changed_when: false
+  tags: [docker, verify]
+
+- name: Get Docker Compose version
+  ansible.builtin.command: docker compose version
+  register: compose_version
+  changed_when: false
+  tags: [docker, verify]
+
+- name: Display Docker versions
+  ansible.builtin.debug:
+    msg:
+      - "{{ docker_version.stdout }}"
+      - "{{ compose_version.stdout }}"
+  tags: [docker, verify]
+

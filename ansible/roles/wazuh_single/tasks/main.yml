@@ -1,0 +1,321 @@
+---
+# =============================================================================
+# wazuh_single role - Single-node Wazuh deployment using official wazuh-ansible
+# =============================================================================
+# This role:
+# 1. Clones the official wazuh-ansible repository (pinned tag)
+# 2. Runs the wazuh-aio.yml (all-in-one) playbook
+# 3. Configures services and verifies deployment
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Prerequisites
+# -----------------------------------------------------------------------------
+- name: Install required packages for Wazuh
+  ansible.builtin.apt:
+    name:
+      - git
+      - python3-pip
+      - gnupg
+      - apt-transport-https
+      - ansible
+    state: present
+    update_cache: yes
+  tags: [wazuh, prereq]
+
+- name: Install required Ansible collections on target
+  ansible.builtin.command:
+    cmd: ansible-galaxy collection install ansible.posix community.general
+  changed_when: false
+  tags: [wazuh, prereq]
+
+# -----------------------------------------------------------------------------
+# Clone wazuh-ansible repository
+# -----------------------------------------------------------------------------
+- name: Check if wazuh-ansible already cloned
+  ansible.builtin.stat:
+    path: "{{ wazuh_ansible_path }}"
+  register: wazuh_ansible_dir
+  tags: [wazuh, clone]
+
+- name: Clone wazuh-ansible repository
+  ansible.builtin.git:
+    repo: "{{ wazuh_ansible_repo }}"
+    dest: "{{ wazuh_ansible_path }}"
+    version: "{{ wazuh_ansible_tag }}"
+    force: no
+  when: not wazuh_ansible_dir.stat.exists
+  tags: [wazuh, clone]
+
+- name: Ensure correct wazuh-ansible version
+  ansible.builtin.git:
+    repo: "{{ wazuh_ansible_repo }}"
+    dest: "{{ wazuh_ansible_path }}"
+    version: "{{ wazuh_ansible_tag }}"
+    force: no
+    update: yes
+  when: wazuh_ansible_dir.stat.exists
+  tags: [wazuh, clone]
+
+# -----------------------------------------------------------------------------
+# Create inventory for wazuh-ansible
+# -----------------------------------------------------------------------------
+- name: Create wazuh-ansible inventory directory
+  ansible.builtin.file:
+    path: "{{ wazuh_ansible_path }}/inventory"
+    state: directory
+    mode: "0755"
+  tags: [wazuh, inventory]
+
+- name: Create wazuh-ansible inventory file
+  ansible.builtin.template:
+    src: wazuh_inventory.ini.j2
+    dest: "{{ wazuh_ansible_path }}/inventory/hosts.ini"
+    mode: "0644"
+  tags: [wazuh, inventory]
+
+- name: Create wazuh-ansible group_vars directory
+  ansible.builtin.file:
+    path: "{{ wazuh_ansible_path }}/inventory/group_vars"
+    state: directory
+    mode: "0755"
+  tags: [wazuh, inventory]
+
+- name: Create wazuh-ansible all-in-one variables
+  ansible.builtin.template:
+    src: wazuh_all_vars.yml.j2
+    dest: "{{ wazuh_ansible_path }}/inventory/group_vars/all.yml"
+    mode: "0644"
+  tags: [wazuh, inventory]
+
+# -----------------------------------------------------------------------------
+# Check if Wazuh is already installed
+# -----------------------------------------------------------------------------
+- name: Check if Wazuh manager is already installed
+  ansible.builtin.stat:
+    path: /var/ossec/bin/wazuh-control
+  register: wazuh_installed
+  tags: [wazuh, install]
+
+# -----------------------------------------------------------------------------
+# Cleanup for reinstall (when wazuh_force_reinstall is true)
+# -----------------------------------------------------------------------------
+- name: Clean up old certificates for reinstall
+  ansible.builtin.file:
+    path: "{{ wazuh_ansible_path }}/playbooks/indexer/certificates"
+    state: absent
+  when: wazuh_force_reinstall | bool
+  tags: [wazuh, cleanup]
+
+- name: Stop Wazuh services for reinstall
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    state: stopped
+  loop:
+    - wazuh-indexer
+    - wazuh-manager
+    - wazuh-dashboard
+    - filebeat
+  ignore_errors: yes
+  when: wazuh_force_reinstall | bool
+  tags: [wazuh, cleanup]
+
+- name: Remove Wazuh packages for reinstall
+  ansible.builtin.apt:
+    name:
+      - wazuh-indexer
+      - wazuh-manager
+      - wazuh-dashboard
+      - filebeat
+    state: absent
+    purge: yes
+  when: wazuh_force_reinstall | bool
+  tags: [wazuh, cleanup]
+
+- name: Clean Wazuh data directories for reinstall
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /var/ossec
+    - /var/lib/wazuh-indexer
+    - /etc/wazuh-indexer
+    - /etc/wazuh-dashboard
+    - /etc/filebeat
+  when: wazuh_force_reinstall | bool
+  tags: [wazuh, cleanup]
+
+# -----------------------------------------------------------------------------
+# Run wazuh-ansible playbook (only if not already installed)
+# -----------------------------------------------------------------------------
+- name: Create wazuh-ansible extra vars file
+  ansible.builtin.copy:
+    dest: "{{ wazuh_ansible_path }}/inventory/extra_vars.yml"
+    content: |
+      ---
+      # Override instances to use consistent naming
+      instances:
+        node1:
+          name: wazuh-indexer
+          ip: 127.0.0.1
+          role: indexer
+
+      indexer_node_name: wazuh-indexer
+      single_node: true
+      indexer_network_host: 127.0.0.1
+
+      # Filebeat node name (must match indexer cert name)
+      filebeat_node_name: wazuh-indexer
+
+      # Dashboard node name (must match indexer cert name for single-node)
+      dashboard_node_name: wazuh-indexer
+
+      # JVM settings (must be integers in MB)
+      indexer_jvm_xms: 2048
+      indexer_jvm_xmx: 2048
+    mode: "0644"
+  tags: [wazuh, install]
+
+- name: Run wazuh-ansible single-node playbook
+  ansible.builtin.command:
+    cmd: >
+      ansible-playbook
+      -i inventory/hosts.ini
+      playbooks/wazuh-single.yml
+      --connection=local
+      -e "@inventory/extra_vars.yml"
+    chdir: "{{ wazuh_ansible_path }}"
+  environment:
+    ANSIBLE_HOST_KEY_CHECKING: "False"
+    ANSIBLE_ROLES_PATH: "{{ wazuh_ansible_path }}/roles"
+  when: (not wazuh_installed.stat.exists) or (wazuh_force_reinstall | bool)
+  register: wazuh_playbook_result
+  changed_when: wazuh_playbook_result.rc == 0
+  tags: [wazuh, install]
+
+# -----------------------------------------------------------------------------
+# Wait for services to start
+# -----------------------------------------------------------------------------
+- name: Wait for Wazuh Indexer to be ready
+  ansible.builtin.wait_for:
+    port: 9200
+    host: 127.0.0.1
+    delay: 10
+    timeout: 300
+  tags: [wazuh, verify]
+
+- name: Wait for Wazuh Manager to be ready
+  ansible.builtin.wait_for:
+    port: 1514
+    host: 0.0.0.0
+    delay: 5
+    timeout: 120
+  tags: [wazuh, verify]
+
+- name: Wait for Wazuh Dashboard to be ready
+  ansible.builtin.wait_for:
+    port: 443
+    host: 0.0.0.0
+    delay: 10
+    timeout: 300
+  tags: [wazuh, verify]
+
+# -----------------------------------------------------------------------------
+# Verify services are running
+# -----------------------------------------------------------------------------
+- name: Ensure wazuh-manager service is running
+  ansible.builtin.systemd:
+    name: wazuh-manager
+    state: started
+    enabled: yes
+  tags: [wazuh, verify]
+
+- name: Ensure wazuh-indexer service is running
+  ansible.builtin.systemd:
+    name: wazuh-indexer
+    state: started
+    enabled: yes
+  tags: [wazuh, verify]
+
+- name: Ensure wazuh-dashboard service is running
+  ansible.builtin.systemd:
+    name: wazuh-dashboard
+    state: started
+    enabled: yes
+  tags: [wazuh, verify]
+
+# -----------------------------------------------------------------------------
+# Generate and save passwords
+# -----------------------------------------------------------------------------
+- name: Check if passwords file already exists
+  ansible.builtin.stat:
+    path: /root/.wazuh-passwords
+  register: wazuh_passwords_file
+  tags: [wazuh, passwords]
+
+- name: Generate new Wazuh passwords
+  ansible.builtin.command:
+    cmd: /usr/share/wazuh-indexer/plugins/opensearch-security/tools/wazuh-passwords-tool.sh -a
+  register: wazuh_password_output
+  when: not wazuh_passwords_file.stat.exists
+  changed_when: true
+  tags: [wazuh, passwords]
+
+- name: Parse admin password from output
+  ansible.builtin.set_fact:
+    wazuh_admin_password: "{{ wazuh_password_output.stdout | regex_search('The password for user admin is ([^\\s]+)', '\\1') | first }}"
+    wazuh_kibanaserver_password: "{{ wazuh_password_output.stdout | regex_search('The password for user kibanaserver is ([^\\s]+)', '\\1') | first }}"
+  when: wazuh_password_output.stdout is defined and wazuh_password_output.stdout | length > 0
+  tags: [wazuh, passwords]
+
+- name: Save passwords to secure file
+  ansible.builtin.copy:
+    dest: /root/.wazuh-passwords
+    content: |
+      # Wazuh Passwords - Generated {{ ansible_date_time.iso8601 }}
+      # KEEP THIS FILE SECURE!
+
+      WAZUH_ADMIN_USER=admin
+      WAZUH_ADMIN_PASSWORD={{ wazuh_admin_password }}
+
+      WAZUH_KIBANASERVER_USER=kibanaserver
+      WAZUH_KIBANASERVER_PASSWORD={{ wazuh_kibanaserver_password }}
+
+      # Dashboard URL: https://{{ ansible_host }}:443
+    mode: "0600"
+    owner: root
+    group: root
+  when: wazuh_admin_password is defined
+  tags: [wazuh, passwords]
+
+- name: Read existing passwords file
+  ansible.builtin.slurp:
+    src: /root/.wazuh-passwords
+  register: existing_passwords
+  when: wazuh_passwords_file.stat.exists
+  tags: [wazuh, passwords]
+
+- name: Parse existing admin password
+  ansible.builtin.set_fact:
+    wazuh_admin_password: "{{ existing_passwords.content | b64decode | regex_search('WAZUH_ADMIN_PASSWORD=([^\\s]+)', '\\1') | first }}"
+  when: existing_passwords.content is defined
+  tags: [wazuh, passwords]
+
+# -----------------------------------------------------------------------------
+# Display credentials info
+# -----------------------------------------------------------------------------
+- name: Display Wazuh deployment info
+  ansible.builtin.debug:
+    msg:
+      - "=========================================="
+      - "Wazuh {{ wazuh_version }} deployed successfully!"
+      - "=========================================="
+      - "Dashboard URL: https://{{ ansible_host }}:443"
+      - ""
+      - "Credentials:"
+      - "  Username: admin"
+      - "  Password: {{ wazuh_admin_password | default('See /root/.wazuh-passwords') }}"
+      - ""
+      - "Passwords saved to: /root/.wazuh-passwords"
+      - "=========================================="
+  tags: [wazuh, info]

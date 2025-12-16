@@ -1,0 +1,36 @@
+# SOC-in-a-Box Inventory File
+# Copy this file to hosts.ini and configure your server(s)
+#
+# Usage:
+#   cp hosts.ini.example hosts.ini
+#   # Edit hosts.ini with your server IP
+#   ansible-playbook playbooks/deploy_server.yml --ask-pass --ask-become-pass
+
+[soc_server]
+# Replace with your server IP or hostname
+# Do NOT put passwords here - use --ask-pass flag instead
+soc01 ansible_host=192.168.1.100 ansible_user=ubuntu
+
+# Example with non-standard SSH port:
+# soc01 ansible_host=192.168.1.100 ansible_user=ubuntu ansible_port=2222
+
+[soc_server:vars]
+# Connection settings
+ansible_python_interpreter=/usr/bin/python3
+
+# These can be overridden per-host if needed
+# ansible_ssh_common_args='-o StrictHostKeyChecking=no'
+
+# ============================================================
+# ENDPOINTS (for Milestone 9 - not used until then)
+# ============================================================
+
+[windows_endpoints]
+# win01 ansible_host=192.168.1.110
+
+[linux_endpoints]
+# linux01 ansible_host=192.168.1.120
+
+[endpoints:children]
+windows_endpoints
+linux_endpoints
